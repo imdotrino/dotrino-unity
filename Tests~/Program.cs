@@ -29,7 +29,9 @@ static class Program
 #if NET5_0_OR_GREATER
         backends.Add(new BclCrypto());
 #endif
-        backends.Add(new OpenSslCrypto());
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)) backends.Add(new CngCrypto());
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Linux)) backends.Add(new OpenSslCrypto());
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX)) backends.Add(new AppleCrypto());
 
         Console.WriteLine("runtime: " + System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
         Run("canonical matches the pilar", Canonical_);

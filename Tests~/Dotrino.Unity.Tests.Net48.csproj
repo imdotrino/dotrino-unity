@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- .NET Framework 4.8 en Windows: sin la cripto de la BCL moderna, así que prueba el backend
+       CNG igual que lo usaría el Mono de Unity en Windows. Se compila desde Linux. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>dotrino-unity-tests-net48</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Runtime/**/*.cs" />
+    <Compile Include="Program.cs" />
+    <None Include="vectors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

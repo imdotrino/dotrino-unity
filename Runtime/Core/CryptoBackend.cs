@@ -46,14 +46,18 @@ namespace Dotrino
         {
 #if NET5_0_OR_GREATER
             return new BclCrypto();
-#elif UNITY_ANDROID || UNITY_IOS
-            // Android reports itself as Linux, and has no libcrypto for apps. On phones the keys
-            // live in dotrino-native (§16), and its bridge is the backend — not written yet.
-            throw new PlatformNotSupportedException("dotrino: the mobile backend (dotrino-native bridge) is not written yet");
+#elif UNITY_IOS
+            return new AppleCrypto();
+#elif UNITY_ANDROID
+            // Android reports itself as Linux, and has no libcrypto for apps: its backend is the
+            // platform's own javax.crypto, reached through JNI — not written yet.
+            throw new PlatformNotSupportedException("dotrino: the Android backend is not written yet");
 #else
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return new CngCrypto();
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return new AppleCrypto();
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return new OpenSslCrypto();
             throw new PlatformNotSupportedException(
-                "dotrino: no crypto backend for " + RuntimeInformation.OSDescription + " yet (Linux only for now)");
+                "dotrino: no crypto backend for " + RuntimeInformation.OSDescription + " yet");
 #endif
         }
     }
