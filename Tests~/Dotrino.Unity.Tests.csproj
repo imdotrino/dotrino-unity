@@ -4,8 +4,11 @@
     <TargetFramework>net9.0</TargetFramework>
     <AssemblyName>dotrino-unity-tests</AssemblyName>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Solo Program.cs: en las subcarpetas hay proyectos de Unity (unity-webrtc) y Java (jvm). -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Program.cs" />
     <ProjectReference Include="../Dotrino.Unity.csproj" />
     <None Include="vectors.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

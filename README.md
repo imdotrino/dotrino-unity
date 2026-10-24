@@ -6,7 +6,7 @@ la bóveda sin WebView. Es el puerto de `@dotrino/identity` al mismo nivel que
 **es un puerto y no decide nada propio**. Si el pilar JS cambia un formato, esto lo sigue, y los
 vectores de oro lo hacen saltar.
 
-Hoy (0.3.0) trae:
+Hoy (0.4.0) trae:
 
 | Pieza | Puerto de |
 |---|---|
@@ -18,7 +18,8 @@ Hoy (0.3.0) trae:
 | `IDeviceKeys`, `SoftwareKeys` | las dos llaves de un aparato (firma y cifrado) |
 | `BinPack` | `binpack.js`: el paquete con bytes y la trama binaria del proxio; el sobre sellado binario |
 | `ProxyConnection` | el cable de `@dotrino/proxy-client`: `identify` con `aud`, saludo, por token y por llave, canales, llaves de cifrado anunciadas y verificadas, códigos de emparejar |
-| `SealedSession` | la sesión que no se cae y lo sella todo (`requireSealed`): reconecta, se re-identifica, re-anuncia su llave, cambia de proxio tras 3 fallos |
+| `SealedSession` | la sesión que no se cae y lo sella todo (`requireSealed`): reconecta, se re-identifica, re-anuncia su llave, cambia de proxio tras 3 fallos; prefiere el canal directo si hay uno |
+| `IDirectTransport`, `UnityWebRtcDirect` | el camino directo: `WebRTCManager` del pilar sobre `com.unity.webrtc` (señalización `__cc_rtc__` con `sdp`, `ice` y `start`, canal `cc`, negociación educada) |
 
 ## La criptografía es la de cada plataforma
 
@@ -59,16 +60,25 @@ await session.AwaitOnline();
 await session.SendSealed(otherPubkey, new JsonObject { { "op", "kickoff" } });
 ```
 
-**Solo el último escalón todavía.** Todo va por el proxio. El camino directo (WebRTC directo,
-Bluetooth, TURN) no está, así que esto todavía no cumple la regla de preferir el camino más
-directo (CLAUDE.md, 2026-09-03). Es lo siguiente del transporte.
+**El camino directo es opcional y sale solo.** Si el juego instala `com.unity.webrtc` (3.0.0),
+se compila el ensamblado `Dotrino.Unity.WebRTC` y basta con enchufarlo:
+
+```csharp
+session.UseDirect(new UnityWebRtcDirect());   // en el hilo principal
+```
+
+El primer mensaje por token sale por el proxio en el acto y el canal se negocia por debajo; los
+siguientes van directo (`Received.Via` dice por dónde llegó cada uno). Tras identificarse pide
+credenciales TURN al proxio. Es opcional porque libwebrtc pesa unos 10 MB por arquitectura, igual
+que en dotrino-native. **Lo que no está:** el Bluetooth, y saber si el canal abierto va directo o
+por TURN (`RouteOf` dice `webrtc`, sin distinguir).
 
 ## Usarlo en un proyecto de Unity
 
 `Packages/manifest.json`:
 
 ```json
-"com.dotrino.unity": "https://github.com/imdotrino/dotrino-unity.git#v0.3.0"
+"com.dotrino.unity": "https://github.com/imdotrino/dotrino-unity.git#v0.4.0"
 ```
 
 ```csharp
@@ -99,6 +109,9 @@ producción.
 La de `mono.sh` es la que cuenta: compila con el Roslyn que trae Unity y corre en su Mono. CI todavía
 no la corre (necesita Unity instalado).
 
+`Tests~/unity-webrtc/run.sh` compila un jugador de Unity para Linux con dos sesiones y su WebRTC y
+comprueba, contra el proxio de producción, que el segundo mensaje llega por el canal directo.
+
 Las carpetas con `~` (`Tests~`, `.artifacts~`, `Native~`) Unity no las importa.
 
 La dylib de macOS se compila con `Native~/build-mac.sh` en un Mac con Xcode y se sube al repo
@@ -115,7 +128,7 @@ prueba esa.
 - Las llaves de la persona en el teléfono: `IDeviceKeys` sobre `dotrino-native` (Identidad Dotrino
   en Android, los grupos del equipo en iOS). Hoy los backends móviles solo hacen la cripto, no
   guardan la llave de nadie.
-- El camino directo del transporte (WebRTC, Bluetooth, TURN) y listar canales.
+- El Bluetooth del transporte, distinguir directo de TURN en `RouteOf`, y listar canales.
 - Enrolar el aparato de escritorio con la bóveda y guardar su llave sellada.
 - El acta (`memberCan`, `verifyActa`), el almacén (`@dotrino/store`) y `@dotrino/compat`.
 

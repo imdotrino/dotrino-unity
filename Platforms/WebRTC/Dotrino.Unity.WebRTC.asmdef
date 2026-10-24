@@ -1,0 +1,16 @@
+{
+    "name": "Dotrino.Unity.WebRTC",
+    "rootNamespace": "Dotrino",
+    "references": ["Dotrino.Unity", "Unity.WebRTC"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": ["DOTRINO_WEBRTC"],
+    "versionDefines": [
+        { "name": "com.unity.webrtc", "expression": "3.0.0", "define": "DOTRINO_WEBRTC" }
+    ],
+    "noEngineReferences": false
+}

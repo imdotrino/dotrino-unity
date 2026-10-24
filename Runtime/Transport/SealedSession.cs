@@ -19,8 +19,9 @@ namespace Dotrino
     /// Callbacks run on the <see cref="SynchronizationContext"/> that was current when it was
     /// created — in Unity, the main thread, so handlers may touch GameObjects.
     ///
-    /// Not here yet: the direct road (WebRTC, Bluetooth). Everything goes through the proxy,
-    /// which is the last step of the ladder; see README.
+    /// The direct road is plugged in with <see cref="UseDirect"/> (WebRTC: Dotrino.Unity.WebRTC).
+    /// Without it everything goes through the proxy, the last step of the ladder. Bluetooth is not
+    /// here.
     /// </summary>
     public sealed class SealedSession : IDisposable
     {
@@ -35,6 +36,8 @@ namespace Dotrino
             public string SenderEncPub;
             public bool Queued;
             public long? QueuedAt;
+            /// <summary>By which road it came: <c>proxy</c> or <c>direct</c> (the WebRTC channel).</summary>
+            public string Via;
         }
 
         /// <summary><c>connecting</c> | <c>online</c> | <c>offline</c> | <c>closed</c>; <see cref="Url"/> is the proxy in use.</summary>
@@ -52,6 +55,7 @@ namespace Dotrino
         public readonly string App;
         public readonly IdentitySealing Sealing;
         volatile ProxyConnection _conn;
+        volatile IDirectTransport _direct;
         Task _loop;
         int _urlIndex;
         TaskCompletionSource<bool> _online = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -115,12 +119,19 @@ namespace Dotrino
                 {
                     await c.Connect().ConfigureAwait(false);
                     c.Message += inc => _ = Deliver(c, inc);
-                    c.TransportEvent += e => Raise(() => TransportEvent?.Invoke(e));
+                    c.TransportEvent += e =>
+                    {
+                        // A peer that left takes its direct channel with it (tokens are not reused).
+                        if (e is ProxyConnection.PeerGone g) _direct?.Close(g.Token);
+                        Raise(() => TransportEvent?.Invoke(e));
+                    };
+                    c.Signal += (from, msg) => _direct?.HandleSignal(from, msg);
                     await c.IdentifyAs(_keys.Publickey, _sign).ConfigureAwait(false);
                     _conn = c;
                     // Without my key announced nobody can seal to me.
                     try { await c.AnnounceEncPub(_keys.Publickey, _keys.EncPub, _sign).ConfigureAwait(false); }
                     catch (Exception e) { OnWarn("could not announce my encryption key", e); }
+                    if (_direct != null) _ = EnableTurn(c, _direct);
                     fails = 0;
                     SetStatus(new Status { State = "online", Url = u });
                     _online.TrySetResult(true);
@@ -161,9 +172,55 @@ namespace Dotrino
             _conn?.Dispose();
         }
 
+        /// <summary>
+        /// Plugs in the DIRECT ROAD. From then on, what goes by token prefers an open channel, and
+        /// the first message to someone opens one underneath. TURN credentials are asked after
+        /// every identify.
+        /// </summary>
+        public void UseDirect(IDirectTransport d)
+        {
+            _direct = d ?? throw new ArgumentNullException(nameof(d));
+            d.Bind(
+                () => _conn?.Token,
+                (to, msg) => { var c = _conn; if (c != null) _ = c.SendSignal(to, msg).ContinueWith(_ => { }, TaskScheduler.Default); },
+                (from, text) =>
+                {
+                    var c = _conn;
+                    if (c == null) return;
+                    JsonObject payload;
+                    try { payload = JsonValue.Parse(text).Obj; } catch (FormatException) { return; }
+                    if (payload != null) _ = Deliver(c, new ProxyConnection.Incoming { From = from, Payload = payload }, "direct");
+                },
+                (from, bytes) =>
+                {
+                    var c = _conn;
+                    if (c == null) return;
+                    ProxyConnection.Incoming inc;
+                    try { inc = ProxyConnection.IncomingPackage(from, null, bytes); }
+                    catch (DotrinoException e) { OnWarn("dropped a direct message that does not unpack (" + e.Code + ")", e); return; }
+                    if (inc != null) _ = Deliver(c, inc, "direct");
+                });
+            var live = _conn;
+            if (live != null) _ = EnableTurn(live, d);
+        }
+
+        /// <summary>Where <paramref name="token"/> goes now (<see cref="IDirectTransport.Route"/>); null = the proxy.</summary>
+        public string RouteOf(string token) => _direct?.Route(token);
+
+        /// <summary>TURN for the direct road, in front of the default STUN. A proxy without TURN leaves STUN only: not an error.</summary>
+        async Task EnableTurn(ProxyConnection c, IDirectTransport d)
+        {
+            try
+            {
+                var servers = await c.TurnCredentials(_keys.Publickey, _sign).ConfigureAwait(false);
+                if (servers.Count > 0) { servers.AddRange(IceServer.DefaultStun); d.SetIceServers(servers); }
+            }
+            catch (Exception e) { OnWarn("could not get TURN credentials", e); }
+        }
+
         ProxyConnection Live() => _conn ?? throw new DotrinoException("not connected to the proxy", "disconnected");
 
-        async Task Deliver(ProxyConnection c, ProxyConnection.Incoming inc)
+        async Task Deliver(ProxyConnection c, ProxyConnection.Incoming inc, string via = "proxy")
         {
             var bin = inc.Packed != null && BinPack.IsBinSealed(inc.Packed) ? inc.Packed : null;
             if (bin == null && !Sealing.IsSealed(inc.Payload))
@@ -177,7 +234,7 @@ namespace Dotrino
             var m = new Received
             {
                 FromToken = inc.From, FromPubkey = inc.FromPubkey ?? (inc.From != null ? c.PubkeyOfToken(inc.From) : null),
-                Payload = opened.payload, SenderEncPub = opened.sender, Queued = inc.Queued, QueuedAt = inc.QueuedAt,
+                Payload = opened.payload, SenderEncPub = opened.sender, Queued = inc.Queued, QueuedAt = inc.QueuedAt, Via = via,
             };
             Raise(() => Message?.Invoke(m));
         }
@@ -214,8 +271,13 @@ namespace Dotrino
                 keys = new[] { await c.EncPubOf(pk).ConfigureAwait(false) };
             }
             byte[] sealedBytes = await Sealing.SealBinary(payload, keys).ConfigureAwait(false);
+            var d = _direct;
+            if (d != null && d.SendBinary(token, sealedBytes)) return;
+            // Knowing whose it is, a dead token (they restarted) sends the SAME envelope to the queue.
             if (pk != null) await c.SendToOrElse(token, sealedBytes, () => _ = c.SendByPubkey(pk, sealedBytes, toApp: App)).ConfigureAwait(false);
             else await c.SendTo(new[] { token }, sealedBytes).ConfigureAwait(false);
+            // And try to go direct for the next one, without waiting for anybody.
+            d?.Upgrade(token);
         }
 
         public Task<(string code, long expiresAt)> RequestPairingCode(long? ttlMs = null) => Live().RequestPairingCode(ttlMs);

@@ -4,7 +4,7 @@
     <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
     <AssemblyName>Dotrino.Unity</AssemblyName>
     <RootNamespace>Dotrino</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>

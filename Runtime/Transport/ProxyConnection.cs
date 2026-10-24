@@ -28,6 +28,8 @@ namespace Dotrino
     public sealed class ProxyConnection : IDisposable
     {
         public const string HelloTag = "__cc_hello__";
+        /// <summary>The direct road's signalling (<see cref="IDirectTransport"/>): a control frame, never for the app.</summary>
+        public const string RtcTag = "__cc_rtc__";
         /// <summary>What this library understands, said in the greeting (<c>SPEAKS</c> of the JS client).</summary>
         public static readonly string[] SpeaksList = { "binary" };
 
@@ -70,6 +72,8 @@ namespace Dotrino
 
         public event Action<Incoming> Message;
         public event Action<Event> TransportEvent;
+        /// <summary>A signalling frame of the direct road arrived from a token (goes to <see cref="IDirectTransport.HandleSignal"/>).</summary>
+        public event Action<string, JsonObject> Signal;
 
         public string Closed { get; private set; }
         public string Token { get; private set; }
@@ -222,6 +226,8 @@ namespace Dotrino
                     string from = o["from"]?.Str;
                     // The greeting is the transport's: it is answered here and never reaches the app.
                     if (payload["t"]?.Str == HelloTag) { if (from != null) OnHello(from, payload); return; }
+                    // The direct road's signalling is a transport control frame too: to WebRTC, not the app.
+                    if (payload["t"]?.Str == RtcTag) { if (from != null) { try { Signal?.Invoke(from, payload); } catch (Exception) { } } return; }
                     Deliver(new Incoming
                     {
                         From = from, FromPubkey = o["from_publickey"]?.Str, Payload = payload,
@@ -385,6 +391,10 @@ namespace Dotrino
 
         // ---------- sending ----------
 
+        /// <summary>A control frame of the direct road, as TEXT: the JS client only reads signalling as text.</summary>
+        public Task SendSignal(string to, JsonObject payload) =>
+            SendText(new JsonObject { { "to", new JsonArray { to } }, { "message", payload.ToString() } });
+
         static JsonObject ToTokens(IEnumerable<string> tokens)
         {
             var a = new JsonArray();
@@ -494,6 +504,25 @@ namespace Dotrino
             if (!Crypto.Verify(data["publickey"].Str, data, sig))
                 throw new DotrinoException("encpub statement: bad signature — the key is not bound to that identity", "encpub-unverified");
             return encPub;
+        }
+
+        // ---------- TURN ----------
+
+        /// <summary><c>getTurnCredentials</c>: temporary ICE servers from the proxy for the direct road. Empty when it has no TURN.</summary>
+        public async Task<List<IceServer>> TurnCredentials(string publickey, Func<JsonObject, Task<string>> sign)
+        {
+            var data = new JsonObject { { "op", "turn-credentials" }, { "publickey", publickey }, { "ts", NowMs() } };
+            var res = await Request(new JsonObject { { "type", "turn-credentials" }, { "data", data }, { "signature", await sign(data).ConfigureAwait(false) } }).ConfigureAwait(false);
+            var list = new List<IceServer>();
+            if (!(res["enabled"] is JsonBool en && en.Value) || !(res["iceServers"] is JsonArray servers)) return list;
+            foreach (var e in servers)
+            {
+                var urls = new List<string>();
+                if (e["urls"] is JsonString one) urls.Add(one.Value);
+                else if (e["urls"] is JsonArray many) foreach (var u in many) if (u.Str != null) urls.Add(u.Str);
+                if (urls.Count > 0) list.Add(new IceServer(urls.ToArray(), e["username"]?.Str, e["credential"]?.Str));
+            }
+            return list;
         }
 
         // ---------- the short code people read out ----------

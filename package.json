@@ -1,6 +1,6 @@
 {
   "name": "com.dotrino.unity",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "displayName": "Dotrino",
   "description": "The Dotrino ecosystem core for Unity: canonical JSON, signatures, key ids, sealed envelopes and the sealed transport to the proxy, byte-identical to @dotrino/identity. Platform crypto, no third-party libraries.",
   "unity": "2021.3",

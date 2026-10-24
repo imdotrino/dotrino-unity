@@ -3,3 +3,16 @@ bin/
 obj/
 .claude/
 .vscode/
+Tests~/unity-webrtc/Library/
+Tests~/unity-webrtc/Logs/
+Tests~/unity-webrtc/Temp/
+Tests~/unity-webrtc/UserSettings/
+Tests~/unity-webrtc/ProjectSettings/
+Tests~/unity-webrtc/Build/
+Tests~/unity-webrtc/*.log
+Tests~/unity-webrtc/Assets/*.unity*
+Tests~/unity-webrtc/Packages/packages-lock.json
+Tests~/unity-webrtc/*.csproj
+Tests~/unity-webrtc/*.sln*
+Tests~/unity-webrtc/Assets/*.meta
+Tests~/unity-webrtc/Assets/**/*.meta
