@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <!-- Con «~» Unity no importa la carpeta: si no, tomaría los .dll de la compilación como parte del paquete. -->
+    <ArtifactsPath>$(MSBuildThisFileDirectory).artifacts~</ArtifactsPath>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+</Project>

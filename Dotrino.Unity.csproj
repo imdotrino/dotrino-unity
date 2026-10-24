@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- netstandard2.1 es lo que compila Unity; net8.0 añade BclCrypto para un servidor .NET. -->
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <AssemblyName>Dotrino.Unity</AssemblyName>
+    <RootNamespace>Dotrino</RootNamespace>
+    <Version>0.1.0</Version>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Runtime/**/*.cs" />
+  </ItemGroup>
+</Project>

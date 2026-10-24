@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '9.0.x' }
+      # Los vectores son los de dotrino-native: si allí se regeneran, esto tiene que saltar.
+      - name: Vectors match dotrino-native
+        run: |
+          curl -fsS https://raw.githubusercontent.com/imdotrino/dotrino-native/main/Tests/DotrinoNativeTests/Resources/vectors.json -o /tmp/native.json
+          cmp /tmp/native.json 'Tests~/vectors.json'
+      - name: Tests (BCL + OpenSSL)
+        run: |
+          dotnet build 'Tests~/Dotrino.Unity.Tests.csproj' -c Release
+          dotnet '.artifacts~/bin/Dotrino.Unity.Tests/release/dotrino-unity-tests.dll'
+      - name: Tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(jq -r .version package.json)
+          proj=$(grep -oP '(?<=<Version>)[^<]+' Dotrino.Unity.csproj)
+          [ "$tag" = "$pkg" ] && [ "$tag" = "$proj" ] || { echo "tag $tag, package.json $pkg, csproj $proj"; exit 1; }

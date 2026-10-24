@@ -1,0 +1,10 @@
+{
+  "name": "com.dotrino.unity",
+  "version": "0.1.0",
+  "displayName": "Dotrino",
+  "description": "The Dotrino ecosystem core for Unity: canonical JSON, signatures, sealed envelopes and key ids, byte-identical to @dotrino/identity. Platform crypto, no third-party libraries.",
+  "unity": "2021.3",
+  "license": "MIT",
+  "author": { "name": "Dotrino", "url": "https://dotrino.com/" },
+  "repository": { "type": "git", "url": "https://github.com/imdotrino/dotrino-unity.git" }
+}
