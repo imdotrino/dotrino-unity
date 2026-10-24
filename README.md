@@ -6,7 +6,7 @@ la bóveda sin WebView. Es el puerto de `@dotrino/identity` al mismo nivel que
 **es un puerto y no decide nada propio**. Si el pilar JS cambia un formato, esto lo sigue, y los
 vectores de oro lo hacen saltar.
 
-Hoy (0.2.0) trae:
+Hoy (0.3.0) trae:
 
 | Pieza | Puerto de |
 |---|---|
@@ -28,14 +28,14 @@ plataforma, sin librerías de terceros**. El núcleo pide cuatro primitivas a un
 (firma ECDSA P-256, ECDH P-256, AES-GCM y generar llaves). SHA-256, HMAC y los bytes aleatorios
 sí funcionan en Mono y quedan en código gestionado.
 
-| Plataforma | Backend | Estado |
+| Plataforma | Backend | Probado |
 |---|---|---|
-| Linux (escritorio) | `OpenSslCrypto`: libcrypto 3 del sistema, API EVP | hecho |
-| .NET 8+ (un servidor, las pruebas) | `BclCrypto` | hecho |
-| Windows | CNG (`bcrypt.dll`) | falta |
-| macOS | Security.framework / CryptoKit por `dotrino-native` | falta |
-| Android | `dotrino-native` (Kotlin) por JNI; las llaves en Identidad Dotrino (§16) | falta |
-| iOS | `dotrino-native` (Swift); las llaves en los grupos del equipo (§16) | falta |
+| Linux (escritorio) | `OpenSslCrypto`: libcrypto 3 del sistema, API EVP | vectores y proxio vivo, en .NET y en el Mono de Unity |
+| Windows | `CngCrypto`: CNG (`bcrypt.dll`) | vectores y proxio vivo en .NET 9 y .NET Framework 4.8 (VM Win11); CI en windows-latest |
+| macOS | `AppleCrypto`: CryptoKit por `Plugins/iOS/DotrinoCrypto.swift`, compilado a `Plugins/macOS/libDotrinoCrypto.dylib` (universal) | vectores y proxio vivo en .NET 9 (Mac Intel); CI en macos-14 (Apple Silicon) |
+| iOS | `AppleCrypto`, la misma fuente Swift: Unity la mete en el proyecto de Xcode | **sin probar**: falta un build de iOS |
+| Android | `AndroidCrypto`: `javax.crypto` por JNI (`Plugins/Android/DotrinoCrypto.java`, ensamblado aparte porque necesita `UnityEngine`) | la clase Java contra la BCL en un JVM (`Tests~/jvm/check.sh`, CI). **El puente JNI sin probar**: Unity 6.6 ya no compila x86_64 para Android y el emulador cae en el driver gráfico antes de llegar al código; hace falta un teléfono |
+| .NET 8+ (un servidor, las pruebas) | `BclCrypto` | referencia de todas las pruebas cruzadas |
 
 El backend se elige solo según la plataforma. Una plataforma sin backend lanza
 `PlatformNotSupportedException` con su nombre: no hay repliegue a algo que solo parezca firmar.
@@ -68,7 +68,7 @@ directo (CLAUDE.md, 2026-09-03). Es lo siguiente del transporte.
 `Packages/manifest.json`:
 
 ```json
-"com.dotrino.unity": "https://github.com/imdotrino/dotrino-unity.git#v0.2.0"
+"com.dotrino.unity": "https://github.com/imdotrino/dotrino-unity.git#v0.3.0"
 ```
 
 ```csharp
@@ -99,11 +99,18 @@ producción.
 La de `mono.sh` es la que cuenta: compila con el Roslyn que trae Unity y corre en su Mono. CI todavía
 no la corre (necesita Unity instalado).
 
-Las carpetas con `~` (`Tests~`, `.artifacts~`) Unity no las importa.
+Las carpetas con `~` (`Tests~`, `.artifacts~`, `Native~`) Unity no las importa.
+
+La dylib de macOS se compila con `Native~/build-mac.sh` en un Mac con Xcode y se sube al repo
+(un paquete de Unity por git no puede compilarla). CI la vuelve a compilar desde la fuente y
+prueba esa.
 
 ## Lo que falta
 
-- Backends de Windows, macOS, Android e iOS (tabla de arriba).
+- Probar iOS y el puente JNI de Android en aparatos de verdad (tabla de arriba).
+- Las llaves de la persona en el teléfono: `IDeviceKeys` sobre `dotrino-native` (Identidad Dotrino
+  en Android, los grupos del equipo en iOS). Hoy los backends móviles solo hacen la cripto, no
+  guardan la llave de nadie.
 - El camino directo del transporte (WebRTC, Bluetooth, TURN) y listar canales.
 - Enrolar el aparato de escritorio con la bóveda y guardar su llave sellada.
 - El acta (`memberCan`, `verifyActa`), el almacén (`@dotrino/store`) y `@dotrino/compat`.

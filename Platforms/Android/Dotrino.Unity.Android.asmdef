@@ -1,0 +1,14 @@
+{
+    "name": "Dotrino.Unity.Android",
+    "rootNamespace": "Dotrino",
+    "references": ["Dotrino.Unity"],
+    "includePlatforms": ["Android"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

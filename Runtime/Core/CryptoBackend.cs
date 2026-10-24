@@ -49,9 +49,10 @@ namespace Dotrino
 #elif UNITY_IOS
             return new AppleCrypto();
 #elif UNITY_ANDROID
-            // Android reports itself as Linux, and has no libcrypto for apps: its backend is the
-            // platform's own javax.crypto, reached through JNI — not written yet.
-            throw new PlatformNotSupportedException("dotrino: the Android backend is not written yet");
+            // Android reports itself as Linux, and has no libcrypto for apps. Its backend
+            // (AndroidCrypto, javax.crypto by JNI) needs UnityEngine, so it lives in the
+            // Dotrino.Unity.Android assembly and sets Current itself before the first scene.
+            throw new PlatformNotSupportedException("dotrino: AndroidCrypto did not register (is Dotrino.Unity.Android in the build?)");
 #else
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return new CngCrypto();
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return new AppleCrypto();

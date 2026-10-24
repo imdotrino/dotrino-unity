@@ -15,25 +15,42 @@ using Dotrino;
 //
 //   dotrino-unity-tests [vectors.json]
 
-static class Program
+public static class Program
 {
     static int _failed, _passed;
     static JsonValue V;
+    static Action<string> Log = Console.WriteLine;
 
     static int Main(string[] args)
     {
+#if NET5_0_OR_GREATER
+        if (args.Length == 2 && args[0] == "--jvm-input") return JvmInput(args[1]);
+        if (args.Length == 2 && args[0] == "--jvm-check") return JvmCheck(args[1]);
+#endif
         string path = args.Length > 0 ? args[0] : Path.Combine(AppContext.BaseDirectory, "vectors.json");
-        V = JsonValue.Parse(File.ReadAllText(path));
+        return Run(File.ReadAllText(path), Console.WriteLine, Environment.GetEnvironmentVariable("DOTRINO_LIVE_PROXY"));
+    }
+
+    /// <summary>The same run from a player (Unity on a phone): the vectors as text, the lines to a logger.</summary>
+    public static int Run(string vectors, Action<string> log, string live)
+    {
+        Log = log;
+        _failed = _passed = 0;
+        V = JsonValue.Parse(vectors);
 
         var backends = new List<ICryptoBackend>();
 #if NET5_0_OR_GREATER
         backends.Add(new BclCrypto());
 #endif
+#if UNITY_ANDROID || UNITY_IOS
+        backends.Add(CryptoBackend.Current);
+#else
         if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)) backends.Add(new CngCrypto());
         if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Linux)) backends.Add(new OpenSslCrypto());
         if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX)) backends.Add(new AppleCrypto());
+#endif
 
-        Console.WriteLine("runtime: " + System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
+        Log("runtime: " + System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
         Run("canonical matches the pilar", Canonical_);
         Run("canonical decimals only as JS writes them", Decimals);
         Run("json roundtrip keeps order and text", JsonRoundtrip);
@@ -63,17 +80,16 @@ static class Program
         if (backends.Count > 1) Run("signatures and secrets agree across backends", () => CrossBackend(backends[0], backends[1]));
 
         // Against the real proxy: two sessions, sealed both ways. Opt-in, it needs the network.
-        string live = Environment.GetEnvironmentVariable("DOTRINO_LIVE_PROXY");
         if (!string.IsNullOrEmpty(live)) Run("two sessions talk sealed through " + live, () => Live(live));
 
-        Console.WriteLine($"{_passed} passed, {_failed} failed");
+        Log($"{_passed} passed, {_failed} failed");
         return _failed == 0 ? 0 : 1;
     }
 
     static void Run(string name, Action test)
     {
-        try { test(); _passed++; Console.WriteLine("ok   " + name); }
-        catch (Exception e) { _failed++; Console.WriteLine("FAIL " + name + ": " + e.GetType().Name + ": " + e.Message); }
+        try { test(); _passed++; Log("ok   " + name); }
+        catch (Exception e) { _failed++; Log("FAIL " + name + ": " + e.GetType().Name + ": " + e.Message); }
     }
 
     static void Eq<T>(T expected, T actual, string what = "")
@@ -321,4 +337,56 @@ static class Program
         Eq("goal", m2.Payload["op"].Str);
         Eq(ka.Publickey, m2.FromPubkey, "who the proxy says sent it");
     }
+
+#if NET5_0_OR_GREATER
+    // ---- the Android backend on a desktop JVM (Tests~/jvm/check.sh) ----
+
+    static string HexOf(byte[] b) => b == null ? "null" : Convert.ToHexString(b).ToLowerInvariant();
+
+    /// <summary>Inputs for JvmCheck.java on stdout; what the BCL expects, in <paramref name="state"/>.</summary>
+    static int JvmInput(string state)
+    {
+        var bcl = new BclCrypto();
+        bcl.GenerateP256(out var d, out var x, out var y);
+        bcl.GenerateP256(out var pd, out var px, out var py);
+        byte[] msg = Crypto.Utf8("{\"op\":\"identify\",\"ñ\":1}"), key = Crypto.RandomBytes(32), iv = Crypto.RandomBytes(12), plain = Crypto.Utf8("hola desde .NET");
+        byte[] sealedBytes = bcl.AesGcmSeal(key, iv, plain), bad = (byte[])sealedBytes.Clone();
+        bad[0] ^= 1;
+        var input = new Dictionary<string, byte[]>
+        {
+            ["d"] = d, ["x"] = x, ["y"] = y, ["msg"] = msg, ["msg2"] = Crypto.Utf8("otro"), ["sig"] = bcl.SignP256(d, x, y, msg),
+            ["px"] = px, ["py"] = py, ["key"] = key, ["iv"] = iv, ["plain"] = plain, ["sealed"] = sealedBytes, ["sealedBad"] = bad,
+        };
+        foreach (var kv in input) Console.WriteLine(kv.Key + "=" + HexOf(kv.Value));
+        File.WriteAllLines(state, input.Select(kv => kv.Key + "=" + HexOf(kv.Value)).Append("ecdh=" + HexOf(bcl.EcdhP256(d, x, y, px, py))));
+        return 0;
+    }
+
+    /// <summary>Checks what JvmCheck.java wrote (stdin) against the BCL.</summary>
+    static int JvmCheck(string state)
+    {
+        var bcl = new BclCrypto();
+        // stdin first: the state file is written by the start of the same pipe.
+        var got = new Dictionary<string, string>();
+        for (string line; (line = Console.ReadLine()) != null;) { var p = line.Split('=', 2); if (p.Length == 2) got[p[0]] = p[1]; }
+        var st = File.ReadAllLines(state).Select(l => l.Split('=', 2)).ToDictionary(p => p[0], p => p[1]);
+        byte[] H(string h) => Convert.FromHexString(h);
+        Run("java verifies a .NET signature", () => Eq("true", got["verify"]));
+        Run("java refuses it over another message", () => Eq("false", got["verifyTampered"]));
+        Run("java refuses a short signature", () => Eq("false", got["verifyShort"]));
+        Run(".NET verifies the java signature", () => True(bcl.VerifyP256(H(st["x"]), H(st["y"]), H(st["msg"]), H(got["sig"])), "java signature does not verify"));
+        Run("same ECDH secret in java and .NET", () => Eq(st["ecdh"], got["ecdh"]));
+        Run("same AES-GCM output in java and .NET", () => Eq(st["sealed"], got["seal"]));
+        Run("java opens what .NET sealed", () => Eq(st["plain"], got["open"]));
+        Run("java says null for a bad tag", () => Eq("null", got["tampered"]));
+        Run("a java key signs and verifies in .NET", () =>
+        {
+            byte[] g = H(got["gen"]);
+            byte[] d = g[..32], x = g[32..64], y = g[64..];
+            True(bcl.VerifyP256(x, y, H(st["msg"]), bcl.SignP256(d, x, y, H(st["msg"]))), "generated key is not consistent");
+        });
+        Log($"{_passed} passed, {_failed} failed");
+        return _failed == 0 ? 0 : 1;
+    }
+#endif
 }

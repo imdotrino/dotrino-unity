@@ -25,6 +25,8 @@ jobs:
         run: |
           dotnet build 'Tests~/Dotrino.Unity.Tests.csproj' -c Release
           dotnet '.artifacts~/bin/Dotrino.Unity.Tests/release/dotrino-unity-tests.dll'
+      - name: Android backend on a JVM (javax.crypto against the BCL)
+        run: bash 'Tests~/jvm/check.sh'
       - name: Tag matches the package version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -32,3 +34,31 @@ jobs:
           pkg=$(jq -r .version package.json)
           proj=$(grep -oP '(?<=<Version>)[^<]+' Dotrino.Unity.csproj)
           [ "$tag" = "$pkg" ] && [ "$tag" = "$proj" ] || { echo "tag $tag, package.json $pkg, csproj $proj"; exit 1; }
+
+  # Cada backend en su sistema: CNG en Windows y CryptoKit en macOS, cruzados con la BCL.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '9.0.x' }
+      - name: Tests (BCL + CNG)
+        shell: bash
+        run: |
+          dotnet build 'Tests~/Dotrino.Unity.Tests.csproj' -c Release
+          dotnet '.artifacts~/bin/Dotrino.Unity.Tests/release/dotrino-unity-tests.dll'
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '9.0.x' }
+      # La dylib se compila aquí desde la fuente: lo que se prueba es la fuente, no el binario del repo.
+      - name: Build the CryptoKit plugin
+        run: bash 'Native~/build-mac.sh'
+      - name: Tests (BCL + CryptoKit)
+        run: |
+          dotnet build 'Tests~/Dotrino.Unity.Tests.csproj' -c Release
+          cp Plugins/macOS/libDotrinoCrypto.dylib '.artifacts~/bin/Dotrino.Unity.Tests/release/'
+          dotnet '.artifacts~/bin/Dotrino.Unity.Tests/release/dotrino-unity-tests.dll'
