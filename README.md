@@ -105,6 +105,10 @@ La dylib de macOS se compila con `Native~/build-mac.sh` en un Mac con Xcode y se
 (un paquete de Unity por git no puede compilarla). CI la vuelve a compilar desde la fuente y
 prueba esa.
 
+## Diseño
+
+- [El lanzador de juegos de escritorio](Documentation~/lanzador.md): la identidad del PC para los juegos y el catálogo. Borrador con preguntas abiertas.
+
 ## Lo que falta
 
 - Probar iOS y el puente JNI de Android en aparatos de verdad (tabla de arriba).
