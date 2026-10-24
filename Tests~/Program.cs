@@ -51,9 +51,18 @@ static class Program
             Run("opens what the JS pilar sealed for an app" + n, OpensAppSealed);
             Run("envelope, wrap and cek roundtrips" + n, Roundtrips);
             Run("aes-gcm refuses a tampered byte" + n, Tamper);
+            Run("opens the binary frame the JS pilar sealed" + n, OpensBinaryFrame);
+            Run("what this device seals in binary opens only for its recipient" + n, BinaryRoundtrip);
         }
+        Run("an unsealed package reaches the app with its bytes as base64", PlainPackage);
+        Run("pack and frame round trip", PackFrameRoundtrip);
+        Run("what is not a package or a frame is said with its code", BadPackCodes);
 
         if (backends.Count > 1) Run("signatures and secrets agree across backends", () => CrossBackend(backends[0], backends[1]));
+
+        // Against the real proxy: two sessions, sealed both ways. Opt-in, it needs the network.
+        string live = Environment.GetEnvironmentVariable("DOTRINO_LIVE_PROXY");
+        if (!string.IsNullOrEmpty(live)) Run("two sessions talk sealed through " + live, () => Live(live));
 
         Console.WriteLine($"{_passed} passed, {_failed} failed");
         return _failed == 0 ? 0 : 1;
@@ -225,5 +234,89 @@ static class Program
         Eq(Convert.ToBase64String(x.EcdhP256(d1, x1, y1, x2, y2)), Convert.ToBase64String(y.EcdhP256(d2, x2, y2, x1, y1)), "ecdh");
         byte[] k = Crypto.RandomBytes(32), iv = Crypto.RandomBytes(12);
         Eq("cross", System.Text.Encoding.UTF8.GetString(y.AesGcmOpen(k, iv, x.AesGcmSeal(k, iv, Crypto.Utf8("cross")))), "gcm");
+    }
+
+    static void OpensBinaryFrame()
+    {
+        var b = V["binSealed"];
+        byte[] frame = Crypto.FromB64(b["frame"].Str);
+        var (header, body) = BinPack.DecodeFrame(frame);
+        Eq("message", header["type"].Str);
+        var inc = ProxyConnection.IncomingPackage("TOK-A", "PK-A", body);
+        True(inc.Packed != null && BinPack.IsBinSealed(inc.Packed), "not a binary sealed envelope");
+        True(System.Text.Encoding.UTF8.GetString(frame).IndexOf("archivo", StringComparison.Ordinal) < 0, "the proxy could read the message");
+        using var keys = SoftwareKeys.FromJwk(null, V["profile"]["encPrivateJwk"]);
+        var (payload, sender) = new IdentitySealing(keys, "messenger").OpenBinary(inc.Packed).Result;
+        True(payload.DeepEquals(b["resolved"]), "payload differs: " + payload);
+        Eq(b["senderEncPub"].Str, sender, "sender");
+        using var other = SoftwareKeys.Generate();
+        try { new IdentitySealing(other, "messenger").OpenBinary(inc.Packed).Wait(); throw new Exception("another key opened it"); }
+        catch (AggregateException) { }
+    }
+
+    static void BinaryRoundtrip()
+    {
+        using var me = SoftwareKeys.Generate();
+        var mine = new IdentitySealing(me, "messenger");
+        var msg = new JsonObject { { "type", "DM" }, { "text", "hola ñ ✓" } };
+        var packed = BinPack.Unpack(mine.SealBinary(msg, new[] { me.EncPub }).Result);
+        True(BinPack.IsBinSealed(packed), "not sealed");
+        var (payload, sender) = mine.OpenBinary(packed).Result;
+        True(payload.DeepEquals(msg), "payload differs");
+        Eq(me.EncPub, sender);
+    }
+
+    static void PlainPackage()
+    {
+        var b = V["binSealed"];
+        var inc = ProxyConnection.IncomingPackage("T", null, Crypto.FromB64(b["plainPacked"].Str));
+        True(inc.Payload.DeepEquals(b["plainResolved"]), "payload differs: " + inc.Payload);
+        True(!BinPack.IsBinSealed(inc.Packed), "plain package taken as sealed");
+    }
+
+    static void PackFrameRoundtrip()
+    {
+        var o = new JsonObject { { "t", "x" }, { "ñ", "✓" } };
+        var (h, body) = BinPack.DecodeFrame(BinPack.EncodeFrame(new JsonObject { { "to", "A" } }, BinPack.Pack(o)));
+        Eq("A", h["to"].Str);
+        True(BinPack.Unpack(body).Json.DeepEquals(o), "package differs");
+    }
+
+    static void BadPackCodes()
+    {
+        string Code(Action a) { try { a(); return null; } catch (DotrinoException e) { return e.Code; } }
+        Eq("bad-frame", Code(() => BinPack.DecodeFrame(new byte[] { 9, 0, 0, 0, 0 })));
+        Eq("bad-pack", Code(() => BinPack.Unpack(new byte[] { 1, 2 })));
+        byte[] head = Crypto.Utf8("{\"x\":{\"__dotrino_bin\":[0,99]}}");
+        var bad = new byte[5 + head.Length + 3];
+        bad[0] = 0xB1; bad[4] = (byte)head.Length;
+        Buffer.BlockCopy(head, 0, bad, 5, head.Length);
+        Eq("bad-pack", Code(() => BinPack.Unpack(bad)));
+    }
+
+    static void Live(string url)
+    {
+        using var ka = SoftwareKeys.Generate();
+        using var kb = SoftwareKeys.Generate();
+        using var a = new SealedSession(new[] { url }, ka, "autoball");
+        using var b = new SealedSession(new[] { url }, kb, "autoball");
+        var got = new System.Collections.Concurrent.BlockingCollection<SealedSession.Received>();
+        b.Message += m => got.Add(m);
+        a.Start(); b.Start();
+        True(a.AwaitOnline().Result && b.AwaitOnline().Result, "not online: " + a.Current + " / " + b.Current);
+
+        // By pubkey: the proxy routes to the identity, and the key to seal to is looked up and verified.
+        Eq(kb.EncPub, a.EncPubOf(kb.Publickey).Result, "announced key");
+        a.SendSealed(kb.Publickey, new JsonObject { { "op", "kickoff" }, { "n", 1 } }).Wait();
+        True(got.TryTake(out var m1, 10_000), "nothing arrived by pubkey");
+        Eq("kickoff", m1.Payload["op"].Str);
+        Eq(ka.EncPub, m1.SenderEncPub, "sender key");
+
+        // By token: greet, learn whose it is, and send live.
+        Eq(kb.Publickey, a.WhoIs(b.Token).Result, "greeting");
+        a.SendSealedTo(b.Token, new JsonObject { { "op", "goal" } }).Wait();
+        True(got.TryTake(out var m2, 10_000), "nothing arrived by token");
+        Eq("goal", m2.Payload["op"].Str);
+        Eq(ka.Publickey, m2.FromPubkey, "who the proxy says sent it");
     }
 }

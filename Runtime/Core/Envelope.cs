@@ -83,6 +83,36 @@ namespace Dotrino
             return new JsonObject { { "app", App }, { "sealed", sealedEnv }, { "from", _keys.EncPub } };
         }
 
+        /// <summary>
+        /// A BINARY sealed envelope (proxy-client ≥ 0.35, the way everything leaves): a fresh
+        /// AES-256 message key sealed with <see cref="Seal"/> as <c>k</c>, and the package of
+        /// <paramref name="msg"/> encrypted with it as iv/ct.
+        /// </summary>
+        public async Task<byte[]> SealBinary(JsonObject msg, IReadOnlyList<string> recipientEncPubs)
+        {
+            byte[] cek = Crypto.RandomBytes(32);
+            try
+            {
+                var k = await Seal(new JsonObject { { "cek", Crypto.B64(cek) } }, recipientEncPubs).ConfigureAwait(false);
+                var (iv, ct) = Crypto.AesGcmSeal(cek, BinPack.Pack(msg));
+                return BinPack.PackSealed(k, iv, ct);
+            }
+            finally { Array.Clear(cek, 0, cek.Length); }
+        }
+
+        /// <summary>Opens a binary sealed envelope. Its bytes reach the app as base64 (<see cref="BinPack.Packed.Resolved"/>).</summary>
+        public async Task<(JsonObject payload, string senderEncPub)> OpenBinary(BinPack.Packed p)
+        {
+            if (!BinPack.IsBinSealed(p)) throw new DotrinoException("not a binary sealed envelope", "not-sealed");
+            var (key, from) = await Open(p.Json["k"]).ConfigureAwait(false);
+            string cek = key["cek"]?.Str ?? throw new DotrinoException("the sealed key of a message has no key inside", "bad-pack");
+            byte[] plain;
+            try { plain = Crypto.AesGcmOpen(Crypto.FromB64(cek), p.BytesOf(p.Json["iv"]), p.BytesOf(p.Json["ct"])); }
+            catch (System.Security.Cryptography.CryptographicException e) { throw new DotrinoException("the message does not open with its key: " + e.Message, "undecipherable"); }
+            var payload = BinPack.Unpack(plain).Resolved().Obj ?? throw new DotrinoException("sealed payload is not an object", "bad-payload");
+            return (payload, from);
+        }
+
         public async Task<(JsonObject payload, string senderEncPub)> Open(JsonValue env)
         {
             if (!IsSealed(env)) throw new DotrinoException("not a sealed envelope of " + App, "not-sealed");

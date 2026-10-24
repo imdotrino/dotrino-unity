@@ -6,7 +6,7 @@ la bóveda sin WebView. Es el puerto de `@dotrino/identity` al mismo nivel que
 **es un puerto y no decide nada propio**. Si el pilar JS cambia un formato, esto lo sigue, y los
 vectores de oro lo hacen saltar.
 
-Hoy (0.1.0) trae:
+Hoy (0.2.0) trae:
 
 | Pieza | Puerto de |
 |---|---|
@@ -16,6 +16,9 @@ Hoy (0.1.0) trae:
 | `Delegation` | `pubkeyId`, la etiqueta `AB12-CD34`, el papel del aparato (`delegationBody` y su comprobación) |
 | `Envelope`, `IdentitySealing` | el sobre de la identidad (v2) y el sellado de `@dotrino/proxy-client` (`{ app, sealed, from }`) |
 | `IDeviceKeys`, `SoftwareKeys` | las dos llaves de un aparato (firma y cifrado) |
+| `BinPack` | `binpack.js`: el paquete con bytes y la trama binaria del proxio; el sobre sellado binario |
+| `ProxyConnection` | el cable de `@dotrino/proxy-client`: `identify` con `aud`, saludo, por token y por llave, canales, llaves de cifrado anunciadas y verificadas, códigos de emparejar |
+| `SealedSession` | la sesión que no se cae y lo sella todo (`requireSealed`): reconecta, se re-identifica, re-anuncia su llave, cambia de proxio tras 3 fallos |
 
 ## La criptografía es la de cada plataforma
 
@@ -42,12 +45,30 @@ El backend se elige solo según la plataforma. Una plataforma sin backend lanza
 enrolado con la bóveda, con la llave sellada en el disco. `IDeviceKeys` es esa frontera: en un
 teléfono la implementa el puente a `dotrino-native`, en escritorio `SoftwareKeys`.
 
+## El transporte
+
+`SealedSession` es lo que usa un juego: todo sale sellado y en binario, y lo que llega sin sellar
+se descarta y se avisa (`Warn`), en las dos direcciones. Los eventos se lanzan en el
+`SynchronizationContext` en el que se creó la sesión: en Unity, el hilo principal.
+
+```csharp
+var session = new SealedSession(new[] { "wss://proxy.dotrino.com" }, keys, "autoball");
+session.Message += m => Debug.Log(m.Payload["op"].Str + " de " + m.FromPubkey);
+session.Start();
+await session.AwaitOnline();
+await session.SendSealed(otherPubkey, new JsonObject { { "op", "kickoff" } });
+```
+
+**Solo el último escalón todavía.** Todo va por el proxio. El camino directo (WebRTC directo,
+Bluetooth, TURN) no está, así que esto todavía no cumple la regla de preferir el camino más
+directo (CLAUDE.md, 2026-09-03). Es lo siguiente del transporte.
+
 ## Usarlo en un proyecto de Unity
 
 `Packages/manifest.json`:
 
 ```json
-"com.dotrino.unity": "https://github.com/imdotrino/dotrino-unity.git#v0.1.0"
+"com.dotrino.unity": "https://github.com/imdotrino/dotrino-unity.git#v0.2.0"
 ```
 
 ```csharp
@@ -68,9 +89,14 @@ del pilar con su `test-vectors/gen.mjs`; CI comprueba que no se desincronizó.
 dotnet build 'Tests~/Dotrino.Unity.Tests.csproj' -c Release
 dotnet '.artifacts~/bin/Dotrino.Unity.Tests/release/dotrino-unity-tests.dll'   # BCL + OpenSSL, .NET 9
 'Tests~/mono.sh'                                                               # el Mono de Unity
+DOTRINO_LIVE_PROXY=wss://proxy.dotrino.com 'Tests~/mono.sh'                     # y contra el proxio de verdad
 ```
 
-La segunda es la que cuenta: compila con el Roslyn que trae Unity y corre en su Mono. CI todavía
+Con `DOTRINO_LIVE_PROXY` se suma la prueba viva: dos sesiones con identidades de usar y tirar se
+hablan selladas por llave (cola del proxio) y por token (saludo y en vivo). CI no la corre: toca
+producción.
+
+La de `mono.sh` es la que cuenta: compila con el Roslyn que trae Unity y corre en su Mono. CI todavía
 no la corre (necesita Unity instalado).
 
 Las carpetas con `~` (`Tests~`, `.artifacts~`) Unity no las importa.
@@ -78,8 +104,7 @@ Las carpetas con `~` (`Tests~`, `.artifacts~`) Unity no las importa.
 ## Lo que falta
 
 - Backends de Windows, macOS, Android e iOS (tabla de arriba).
-- El transporte: el cable de `@dotrino/proxy-client` (`identify`, `sendSealed`, canales) sobre
-  WebSocket, con los escalones del §transporte.
+- El camino directo del transporte (WebRTC, Bluetooth, TURN) y listar canales.
 - Enrolar el aparato de escritorio con la bóveda y guardar su llave sellada.
 - El acta (`memberCan`, `verifyActa`), el almacén (`@dotrino/store`) y `@dotrino/compat`.
 

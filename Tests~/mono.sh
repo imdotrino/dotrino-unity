@@ -11,6 +11,6 @@ OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 "$M/bin/mono" "$M/lib/mono/msbuild/Current/bin/Roslyn/csc.exe" -nologo -langversion:9 -out:"$OUT/tests.exe" \
   -r:"$L/Facades/netstandard.dll" -r:"$L/System.Core.dll" -r:"$L/Facades/System.Runtime.dll" \
-  -r:"$L/Facades/System.Runtime.InteropServices.RuntimeInformation.dll" \
+  -r:"$L/Facades/System.Runtime.InteropServices.RuntimeInformation.dll" -r:"$L/System.dll" \
   $(find Runtime -name '*.cs') 'Tests~/Program.cs'
 MONO_PATH="$M/lib/mono/unityjit-linux" "$M/bin/mono" "$OUT/tests.exe" 'Tests~/vectors.json'
