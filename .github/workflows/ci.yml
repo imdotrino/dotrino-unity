@@ -49,7 +49,7 @@ jobs:
           dotnet '.artifacts~/bin/Dotrino.Unity.Tests/release/dotrino-unity-tests.dll'
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
